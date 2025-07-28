@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use num::BigUint;
 use std::io;
 
@@ -43,20 +41,20 @@ pub struct Payload {
 }
 
 impl Block {
-    fn new(data: Box<[u8]>) -> Block {
+    pub fn new(data: Box<[u8]>) -> Block {
         return Block {
             data: data,
             fill: Box::new(|| { }),
         };
     }
 
-    fn fill(&mut self) {
+    pub fn fill(&mut self) {
         (self.fill)();
     }
 }
 
 impl Bomb {
-    fn new(data: Box<[u8]>) -> Bomb {
+    pub fn new(data: Box<[u8]>) -> Bomb {
         return Bomb {
             data: data,
             size: BigUint::ZERO,
@@ -64,7 +62,7 @@ impl Bomb {
         };
     }
 
-    fn fill(&mut self, size: BigUint) {
+    pub fn fill(&mut self, size: BigUint) {
         (self.fill)(&size);
         self.size = size;
     }
@@ -72,6 +70,9 @@ impl Bomb {
 
 fn biguint_to_u64(num: BigUint) -> Option<u64> {
     let digits = num.to_u64_digits();
+    if digits.len() == 0 {
+        return Option::Some(0);
+    }
     if digits.len() != 1 {
         return Option::None;
     }
@@ -79,7 +80,13 @@ fn biguint_to_u64(num: BigUint) -> Option<u64> {
 }
 
 impl Payload {
-    fn write(&self, output: &mut impl io::Write) -> Result<usize, io::Error> {
+    pub fn new(data: Box<[Segment]>) -> Payload {
+        return Payload {
+            data: data,
+        };
+    }
+
+    pub fn write(&self, output: &mut impl io::Write) -> Result<usize, io::Error> {
         let mut size: usize = 0;
         for segment in (*self.data).iter() {
             match segment {
@@ -122,7 +129,7 @@ impl Payload {
         return Result::Ok(size)
     }
 
-    fn adler32(&self) -> [u8; 4] {
+    pub fn adler32(&self) -> [u8; 4] {
         let mut s0: u64 = 1;
         let mut s1: u64 = 0;
         for segment in (*self.data).iter() {
@@ -164,8 +171,9 @@ impl Payload {
                         panic!("Failed to convert BigUint to u64");
                     }
 
-                    let num_rects = (full_blocks * (full_blocks-1 * 32761)) % 65521;
+                    let num_rects = (full_blocks * (full_blocks-1) * 32761) % 65521;
 
+                    s1 += s0 * full_blocks * (b.data.len() as u64);
                     s0 += t0 * full_blocks;
                     s1 += tri * full_blocks + rect * num_rects;
 
