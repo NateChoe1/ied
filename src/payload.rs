@@ -5,7 +5,7 @@ use std::io;
  * checksums. Bombs are only guaranteed to be valid if their corresponding payload is fully
  * initialized; that is to say that every bomb is populated. */
 pub struct Block {
-    data: Box<[u8]>,
+    data: Option<Box<[u8]>>,
     fill: Box<dyn Fn()>,
 }
 
@@ -38,12 +38,13 @@ pub enum Segment {
 
 pub struct Payload {
     pub data: Box<[Segment]>,
+    child: Option<Box<Payload>>,
 }
 
 impl Block {
     pub fn new(data: Box<[u8]>) -> Block {
         return Block {
-            data: data,
+            data: Option::Some(data),
             fill: Box::new(|| { }),
         };
     }
@@ -83,50 +84,64 @@ impl Payload {
     pub fn new(data: Box<[Segment]>) -> Payload {
         return Payload {
             data: data,
+            child: Option::None,
         };
     }
 
-    pub fn write(&self, output: &mut impl io::Write) -> Result<usize, io::Error> {
+    fn fill_preset(&mut self) {
+        if let Option::Some(child) = &mut self.child {
+            child.fill_preset();
+        }
+        for segment in (*self.data).iter_mut() {
+            if let Segment::Block(b) = segment {
+                b.fill();
+            }
+        }
+    }
+
+    pub fn fill(&mut self, bomb_size: BigUint) {
+        for segment in (*self.data).iter_mut() {
+            if let Segment::Bomb(b) = segment {
+                b.fill(bomb_size.clone());
+            }
+        }
+        self.fill_preset();
+    }
+
+    pub fn write(&self, output: &mut impl io::Write) -> usize {
         let mut size: usize = 0;
         for segment in (*self.data).iter() {
             match segment {
                 Segment::Block(b) => {
-                    let r = output.write(&b.data);
-                    if matches!(r, Result::Err(_)) {
-                        return r;
-                    }
-                    if let Ok(s) = r {
-                        if s < b.data.len() {
-                            return Result::Err(io::Error::new(io::ErrorKind::Other,
-                                    "Write failed"));
-                        }
-                        size += s;
+                    let data: &[u8];
+                    if let Option::Some(d) = &b.data {
+                        data = d;
                     } else {
-                        return r;
+                        panic!("Trying to write uninitialized data");
                     }
+                    let s = output.write(data).expect("Write failed!");
+                    if s < data.len() {
+                        panic!("Write failed");
+                    }
+                    size += s;
                 }
                 Segment::Bomb(b) => {
                     let mut i = BigUint::ZERO;
                     let mut idx = 0;
                     while i < b.size {
                         let slice = [b.data[idx]];
-                        let result = output.write(&slice);
-                        if let Ok(s) = result {
-                            if s < 1 {
-                                return Result::Err(io::Error::new(io::ErrorKind::Other,
-                                        "Write failed"));
-                            }
-                            size += 1;
-                        } else {
-                            return result;
+                        let s = output.write(&slice).expect("Write failed.");
+                        if s < 1 {
+                            panic!("Write failed");
                         }
+                        size += 1;
                         idx = (idx + 1) % b.data.len();
                         i += 1 as usize;
                     }
                 }
             }
         }
-        return Result::Ok(size)
+        return size
     }
 
     pub fn adler32(&self) -> [u8; 4] {
@@ -135,7 +150,13 @@ impl Payload {
         for segment in (*self.data).iter() {
             match segment {
                 Segment::Block(b) => {
-                    for byte in &b.data {
+                    let data: &[u8];
+                    if let Option::Some(d) = &b.data {
+                        data = d;
+                    } else {
+                        panic!("Calculating Adler32 of uninitialized block");
+                    }
+                    for byte in data {
                         s0 += *byte as u64;
                         s0 %= 65521;
                         s1 += s0;
@@ -156,7 +177,8 @@ impl Payload {
                     let tri = t1;
 
                     let rect = t0 * (b.data.len() as u64);
-                    let full_blocks_option = biguint_to_u64((b.size.clone() / b.data.len()) % (65521 as u64));
+                    let full_blocks_option = biguint_to_u64(
+                            (b.size.clone() / b.data.len()) % (65521 as u64));
                     let full_blocks: u64;
                     if let Some(v) = full_blocks_option {
                         full_blocks = v;
