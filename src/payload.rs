@@ -1,4 +1,4 @@
-#[allow(dead_code)]
+#![allow(dead_code)]
 
 use num::BigUint;
 use std::io;
@@ -217,9 +217,9 @@ impl Payload {
 
         fn apply(crc: u32, byte: u8) -> u32 {
             let mut ret: u32 = crc ^ (byte as u32);
-            for i in 0..8 {
+            for _i in 0..8 {
                 if (ret & 1) != 0 {
-                    ret = (ret >> 1) ^ 0xEDB88320;
+                    ret = (ret >> 1) ^ 0xedb88320;
                 } else {
                     ret = ret >> 1;
                 }
@@ -241,12 +241,34 @@ impl Payload {
                     }
                 }
                 Segment::Bomb(b) => {
-                    panic!("Unimplemented");
+                    let mut matr = CrcMatrix::new();
+                    let size = b.size.clone();
+                    let full_blocks = &size / b.data.len();
+                    let extra_bytes = biguint_to_u64(size % b.data.len())
+                        .expect("Failed to convert biguint to u64");
+
+                    for i in 0..b.data.len() {
+                        let byte = b.data[b.data.len() - i - 1];
+                        for j in 0..8 {
+                            if (byte & (1 << (7 - j))) != 0 {
+                                matr.push_1();
+                            } else {
+                                matr.push_0();
+                            }
+                        }
+                    }
+
+                    matr.exponentiate(&full_blocks);
+                    crc = matr.apply(crc);
+
+                    for i in 0..extra_bytes {
+                        crc = apply(crc, b.data[i as usize]);
+                    }
                 }
             }
         }
 
-        crc ^= 0xffffffff;
+        crc = !crc;
         return [
             (crc >> 24) as u8,
             (crc >> 16) as u8,
@@ -301,7 +323,7 @@ impl CrcMatrix {
             self.items[i] = 0;
             for j in 0..33 {
                 let product = row & matr[j];
-                let bit = xor_each_bit(product) << (32 - i);
+                let bit = xor_each_bit(product) << (32 - j);
                 self.items[i] |= bit;
             }
         }
@@ -310,8 +332,6 @@ impl CrcMatrix {
     fn push_0(&mut self) {
         self.multiply([
             0b100000000000000000000000000000000,
-            0b000000100110000010001110110110111,
-            0b010000000000000000000000000000000,
             0b001000000000000000000000000000000,
             0b000100000000000000000000000000000,
             0b000010000000000000000000000000000,
@@ -342,14 +362,14 @@ impl CrcMatrix {
             0b000000000000000000000000000001000,
             0b000000000000000000000000000000100,
             0b000000000000000000000000000000010,
+            0b000000000000000000000000000000001,
+            0b011101101101110001000001100100000,
         ]);
     }
 
     fn push_1(&mut self) {
         self.multiply([
-            0b100000000000000000000000000000001,
-            0b000000100110000010001110110110111,
-            0b010000000000000000000000000000000,
+            0b111101101101110001000001100100000,
             0b001000000000000000000000000000000,
             0b000100000000000000000000000000000,
             0b000010000000000000000000000000000,
@@ -380,17 +400,75 @@ impl CrcMatrix {
             0b000000000000000000000000000001000,
             0b000000000000000000000000000000100,
             0b000000000000000000000000000000010,
+            0b000000000000000000000000000000001,
+            0b011101101101110001000001100100000,
         ]);
     }
 
-    fn apply(&self, v: u64) -> u64 {
-        let vector = v | (1 << 32);
+    fn square(&mut self) {
+        let mut other = self.clone();
+        other.transpose();
+        self.multiply(other.items);
+    }
+
+    fn clone(&self) -> CrcMatrix {
+        let mut ret = CrcMatrix {
+            items: [0; 33],
+        };
+        for i in 0..33 {
+            ret.items[i] = self.items[i];
+        }
+        return ret;
+    }
+
+    fn transpose(&mut self) {
+        let mut new_items: [u64; 33] = [0; 33];
+        for i in 0..33 {
+            for j in 0..33 {
+                let bit: u64;
+                if (self.items[i] & (1 << (32 - j))) != 0 {
+                    bit = 1 << (32 - i);
+                } else {
+                    bit = 0;
+                }
+                new_items[j] |= bit;
+            }
+        }
+        self.items = new_items;
+    }
+
+    fn exponentiate_r(&mut self, power: &BigUint, reference: &CrcMatrix) {
+        if *power <= (1 as u8).into() {
+            return;
+        }
+
+        self.exponentiate_r(&(power/(2 as u8)), reference);
+        self.square();
+        if (power & BigUint::from_slice(&[1 as u32])) != BigUint::ZERO {
+            self.multiply(reference.items);
+        }
+    }
+
+    fn exponentiate(&mut self, power: &BigUint) {
+        let mut reference = self.clone();
+        reference.transpose();
+        self.exponentiate_r(power, &reference);
+    }
+
+    fn apply(&self, v: u32) -> u32 {
+        let vector = (v as u64) | (1 << 32);
         let mut ret: u64 = 0;
         for i in 1..33 {
             let product = self.items[i] & vector;
             let bit = xor_each_bit(product) << (32 - i);
             ret |= bit;
         }
-        return ret;
+        return ret as u32;
+    }
+
+    fn print(&self) {
+        for i in 0..33 {
+            println!("{:033b}", self.items[i]);
+        }
     }
 }
