@@ -72,9 +72,9 @@ impl Bomb {
         };
     }
 
-    pub fn fill(&mut self, child: Option<&mut Payload>, size: BigUint) {
-        (self.fill)(child, &size);
-        self.size = size;
+    pub fn fill(&mut self, child: Option<&mut Payload>, size: &BigUint) {
+        (self.fill)(child, size);
+        self.size = size.clone();
     }
 }
 
@@ -101,13 +101,13 @@ impl Payload {
         }
     }
 
-    pub fn fill(&mut self, bomb_size: BigUint) {
+    pub fn fill(&mut self, bomb_size: &BigUint) {
         for segment in (*self.data).iter_mut() {
             if let Segment::Bomb(b) = segment {
                 if let Option::Some(child) = &mut self.child {
-                    b.fill(Option::Some(child), bomb_size.clone());
+                    b.fill(Option::Some(child), bomb_size);
                 } else {
-                    b.fill(Option::None, bomb_size.clone());
+                    b.fill(Option::None, bomb_size);
                 }
             }
         }
@@ -285,11 +285,26 @@ impl Payload {
 
         crc = !crc;
         return [
-            (crc >> 24) as u8,
-            (crc >> 16) as u8,
-            (crc >> 8)  as u8,
             (crc >> 0)  as u8,
+            (crc >> 8)  as u8,
+            (crc >> 16) as u8,
+            (crc >> 24) as u8,
         ]
+    }
+
+    pub fn size(&self) -> BigUint {
+        let mut ret = BigUint::ZERO;
+        for segment in (*self.data).iter() {
+            match segment {
+                Segment::Block(b) => {
+                    ret += b.len;
+                }
+                Segment::Bomb(b) => {
+                    ret += &b.size;
+                }
+            }
+        }
+        return ret;
     }
 }
 
@@ -653,9 +668,9 @@ fn deflate_to_vec(payload: &Payload, output: &mut Vec<Segment>) {
                 if let Segment::Bomb(b) =
                         &mut child.data[end] {
                     if let Option::Some(grandchild) = &mut child.child {
-                        b.fill(Option::Some(grandchild), child_size);
+                        b.fill(Option::Some(grandchild), &child_size);
                     } else {
-                        b.fill(Option::None, child_size);
+                        b.fill(Option::None, &child_size);
                     }
                 }
             };
@@ -710,6 +725,57 @@ pub fn zlib(payload: Payload) -> Payload {
         len: 4,
     };
     blocks.push(Segment::Block(checksum));
+
+    return Payload {
+        data: blocks.into_boxed_slice(),
+        child: Option::Some(Box::new(payload)),
+    };
+}
+
+pub fn gzip(payload: Payload) -> Payload {
+    let mut blocks = Vec::<Segment>::new();
+
+    /* gzip header */
+    blocks.push(Segment::Block(Block::new(Box::new([
+        0x1f, 0x8b,              /* ID1, ID2 */
+        0x08,                    /* CM (DEFLATE) */
+        0x00,                    /* FLG (no flags) */
+        0x00, 0x00, 0x00, 0x00,  /* MTIME (no time available) */
+        0x02,                    /* XFL, maximum compression, slowest algorithm */
+        0xff,                    /* OS (unknown) */
+    ]))));
+
+    deflate_to_vec(&payload, &mut blocks);
+
+    fn crc32(child_op: Option<&mut Payload>) -> Box<[u8]> {
+        let child = child_op.expect("Calculating CRC-32 checksum of invalid child");
+        return Box::new(child.crc32());
+    }
+
+    /* CRC-32 checksum */
+    let checksum = Block {
+        data: BlockData::Unfilled(Box::new(crc32)),
+        len: 4,
+    };
+    blocks.push(Segment::Block(checksum));
+
+    /* ISIZE */
+    fn len(child_op: Option<&mut Payload>) -> Box<[u8]> {
+        let child = child_op.expect("Calculating length of invalid child");
+        let len = child.size();
+        let lenu32 = len.to_u32_digits()[0];
+        return Box::new([
+            (lenu32) as u8,
+            (lenu32 >> 8) as u8,
+            (lenu32 >> 16) as u8,
+            (lenu32 >> 24) as u8,
+        ]);
+    }
+    let length = Block {
+        data: BlockData::Unfilled(Box::new(len)),
+        len: 4,
+    };
+    blocks.push(Segment::Block(length));
 
     return Payload {
         data: blocks.into_boxed_slice(),
