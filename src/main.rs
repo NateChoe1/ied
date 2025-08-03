@@ -16,7 +16,7 @@ fn main() {
     let payload_data: [payload::Segment; 2] = [block1, block2];
     let payload = payload::Payload::new(Box::new(payload_data));
 
-    let mut compressed_payload = payload::deflate_raw(payload);
+    let mut compressed_payload = payload::zlib(payload);
     compressed_payload.fill(biguint(1));
 
     compressed_payload.write(&mut std::io::stdout());

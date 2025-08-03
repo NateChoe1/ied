@@ -687,3 +687,32 @@ pub fn deflate_raw(payload: Payload) -> Payload {
         child: Option::Some(Box::new(payload)),
     };
 }
+
+pub fn zlib(payload: Payload) -> Payload {
+    let mut blocks = Vec::<Segment>::new();
+
+    /* zlib header: DEFLATE, fastest compression */
+    blocks.push(Segment::Block(Block::new(Box::new([
+        0x08,  /* CMF */
+        0x1d,  /* FLAGS */
+    ]))));
+
+    deflate_to_vec(&payload, &mut blocks);
+
+    fn adler32(child_op: Option<&mut Payload>) -> Box<[u8]> {
+        let child = child_op.expect("Calculating Adler-32 checksum of invalid child");
+        return Box::new(child.adler32());
+    }
+
+    /* Adler-32 checksum */
+    let checksum = Block {
+        data: BlockData::Unfilled(Box::new(adler32)),
+        len: 4,
+    };
+    blocks.push(Segment::Block(checksum));
+
+    return Payload {
+        data: blocks.into_boxed_slice(),
+        child: Option::Some(Box::new(payload)),
+    };
+}
