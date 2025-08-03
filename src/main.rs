@@ -15,10 +15,9 @@ fn main() {
 
     let block3_data: [u8; 1] = [67];
     let block3_b = payload::Block::new(Box::new(block3_data));
-    let _block3 = payload::Segment::Block(block3_b);
+    let block3 = payload::Segment::Block(block3_b);
 
-    //let payload_data: [payload::Segment; 3] = [block1, block2, block3];
-    let payload_data: [payload::Segment; 2] = [block1, block2];
+    let payload_data: [payload::Segment; 3] = [block1, block2, block3];
     let payload = payload::Payload::new(Box::new(payload_data));
 
     let mut compressed = Vec::<payload::Segment>::new();
@@ -26,7 +25,7 @@ fn main() {
 
     let mut compressed_payload = payload::Payload::new(compressed.into_boxed_slice());
     compressed_payload.child = Option::Some(Box::new(payload));
-    compressed_payload.fill(biguint(100));
+    compressed_payload.fill(biguint(1));
 
     compressed_payload.write(&mut std::io::stdout());
 }

@@ -517,14 +517,8 @@ pub fn deflate_raw(payload: &Payload, output: &mut Vec<Segment>) {
         let mut data_len: usize = 0;
         let is_last = end+1 >= payload.data.len();
 
-        /* If we saw a Bomb last time, \x02\x00\x00\xff\xff. This ends the Bomb and byte aligns us.
-         * */
-        if start != 0 {
-            payload_len += 5;
-        }
-
         for i in start..=end {
-            if end >= payload.data.len() {
+            if i >= payload.data.len() {
                 break;
             }
             match &payload.data[i] {
@@ -551,22 +545,20 @@ pub fn deflate_raw(payload: &Payload, output: &mut Vec<Segment>) {
         let gen_block = move |child_op: Option<&mut Payload>| -> Box<[u8]> {
             let mut ret: Vec<u8> = Vec::new();
             let mut last_block: usize = 0;
+            let mut last_bit: u8 = 0;
 
             /* the block of the child we're writing */
-            let mut child_idx: usize = 0;
+            let mut child_idx: usize = start_c;
             /* the index within that block */
             let mut child_pos: usize = 0;
 
             let child = child_op.expect("Trying to fill a block with no child");
 
-            /* if we saw a bomb last time, \x02\x00\x00\xff\xff */
+            /* if we saw a bomb last time, \x02 */
             if start_c != 0 {
                 last_block = ret.len();
+                last_bit = 0x20;
                 ret.push(0x02);
-                ret.push(0x00);
-                ret.push(0x00);
-                ret.push(0xff);
-                ret.push(0xff);
             }
 
             let mut this_start = 0;
@@ -574,10 +566,13 @@ pub fn deflate_raw(payload: &Payload, output: &mut Vec<Segment>) {
                 let this_end = std::cmp::min(this_start + 0xffff, data_len);
                 let this_len = this_end - this_start;
 
-                last_block = ret.len();
-
-                /* start of an uncompressed block */
-                ret.push(0x00);
+                /* start of an uncompressed block. note that if the previous block was a bomb, we
+                 * write these bits there. */
+                if start_c == 0 || this_start != 0 {
+                    last_block = ret.len();
+                    last_bit = 0x01;
+                    ret.push(0x00);
+                }
 
                 /* uncompressed block length */
                 ret.push((this_len & 0xff) as u8);
@@ -639,7 +634,7 @@ pub fn deflate_raw(payload: &Payload, output: &mut Vec<Segment>) {
 
             if is_last {
                 /* there is no bomb after this, so we set the BFINAL bit */
-                ret[last_block] |= 1;
+                ret[last_block] |= last_bit;
             }
 
             return ret.as_slice().into();
@@ -653,7 +648,7 @@ pub fn deflate_raw(payload: &Payload, output: &mut Vec<Segment>) {
 
         if has_rep {
             let fill = move |child_op: Option<&mut Payload>, size: &BigUint| {
-                let child_size = size * 1032u16 + 774u16;
+                let child_size = size * 1032u16 + 1290u16;
                 let child = child_op.expect("Trying to fill DEFLATE bomb with no child");
                 if let Segment::Bomb(b) =
                         &mut child.data[end] {
