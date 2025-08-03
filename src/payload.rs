@@ -7,8 +7,13 @@ use std::io;
  * checksums. Bombs are only guaranteed to be valid if their corresponding payload is fully
  * initialized; that is to say that every bomb is populated. */
 pub struct Block {
-    data: Option<Box<[u8]>>,
-    fill: Box<dyn Fn()>,
+    data: BlockData,
+    len: usize,
+}
+
+enum BlockData {
+    Known(Box<[u8]>),
+    Unfilled(Box<dyn Fn(Option<&mut Payload>) -> Box<[u8]>>),
 }
 
 /* A bomb is a very repetitive, highly compressible piece of data. The repeated bytes are an
@@ -29,7 +34,7 @@ pub struct Bomb {
     * The fill closure only informs the lower level of its size, it does not change the size of the
     * current payload.
     * */
-    fill: Box<dyn Fn(&BigUint)>,
+    fill: Box<dyn Fn(Option<&mut Payload>, &BigUint)>,
 }
 
 /* A segment is either a block or a bomb */
@@ -46,13 +51,15 @@ pub struct Payload {
 impl Block {
     pub fn new(data: Box<[u8]>) -> Block {
         return Block {
-            data: Option::Some(data),
-            fill: Box::new(|| { }),
+            len: (&data).len(),
+            data: BlockData::Known(data),
         };
     }
 
-    pub fn fill(&mut self) {
-        (self.fill)();
+    pub fn fill(&mut self, child: Option<&mut Payload>) {
+        if let BlockData::Unfilled(fill) = &mut self.data {
+            self.data = BlockData::Known(fill(child));
+        }
     }
 }
 
@@ -61,12 +68,12 @@ impl Bomb {
         return Bomb {
             data: data,
             size: BigUint::ZERO,
-            fill: Box::new(|_size: &BigUint| {}),
+            fill: Box::new(|_child, _size| {}),
         };
     }
 
-    pub fn fill(&mut self, size: BigUint) {
-        (self.fill)(&size);
+    pub fn fill(&mut self, child: Option<&mut Payload>, size: BigUint) {
+        (self.fill)(child, &size);
         self.size = size;
     }
 }
@@ -85,7 +92,11 @@ impl Payload {
         }
         for segment in (*self.data).iter_mut() {
             if let Segment::Block(b) = segment {
-                b.fill();
+                if let Option::Some(child) = &mut self.child {
+                    b.fill(Option::Some(child));
+                } else {
+                    b.fill(Option::None);
+                }
             }
         }
     }
@@ -93,7 +104,11 @@ impl Payload {
     pub fn fill(&mut self, bomb_size: BigUint) {
         for segment in (*self.data).iter_mut() {
             if let Segment::Bomb(b) = segment {
-                b.fill(bomb_size.clone());
+                if let Option::Some(child) = &mut self.child {
+                    b.fill(Option::Some(child), bomb_size.clone());
+                } else {
+                    b.fill(Option::None, bomb_size.clone());
+                }
             }
         }
         self.fill_preset();
@@ -105,7 +120,7 @@ impl Payload {
             match segment {
                 Segment::Block(b) => {
                     let data: &[u8];
-                    if let Option::Some(d) = &b.data {
+                    if let BlockData::Known(d) = &b.data {
                         data = d;
                     } else {
                         panic!("Trying to write uninitialized data");
@@ -142,7 +157,7 @@ impl Payload {
             match segment {
                 Segment::Block(b) => {
                     let data: &[u8];
-                    if let Option::Some(d) = &b.data {
+                    if let BlockData::Known(d) = &b.data {
                         data = d;
                     } else {
                         panic!("Calculating Adler32 of uninitialized block");
@@ -231,7 +246,7 @@ impl Payload {
             match segment {
                 Segment::Block(b) => {
                     let data: &[u8];
-                    if let Option::Some(d) = &b.data {
+                    if let BlockData::Known(d) = &b.data {
                         data = d;
                     } else {
                         panic!("Calculating CRC32 of uninitialized block");
@@ -470,5 +485,200 @@ impl CrcMatrix {
         for i in 0..33 {
             println!("{:033b}", self.items[i]);
         }
+    }
+}
+
+/* Every message can be expressed as a series of Block, Bomb(0x55), Block, Bomb(0x55), ...
+ *
+ * Each block contains literal blocks, as well as the header for the next Bomb block. The size of
+ * the Block can be statically determined, but its contents are determined at fill time. */
+fn deflate_raw(payload: &Payload, output: &mut Vec<Segment>) {
+    let mut start = 0;
+    while start < payload.data.len() {
+        let mut end = start;
+        let has_rep: bool;
+
+        /* Find the bounds of this Block */
+        loop {
+            if end >= payload.data.len() {
+                has_rep = false;
+                break;
+            }
+            if let Segment::Bomb(_b) = &payload.data[end] {
+                has_rep = true;
+                break;
+            }
+            end += 1;
+        }
+
+        /* Create this Block */
+        let start_c = start;
+        let mut payload_len: usize = 0;
+        let mut data_len: usize = 0;
+        let is_last = end+1 >= payload.data.len();
+
+        /* If we saw a Bomb last time, \x02\x00\x00\xff\xff. This ends the Bomb and byte aligns us.
+         * */
+        if start != 0 {
+            payload_len += 5;
+        }
+
+        for i in start..=end {
+            if end >= payload.data.len() {
+                break;
+            }
+            match &payload.data[i] {
+                Segment::Block(b) => {
+                    data_len += b.len;
+                }
+                Segment::Bomb(b) => {
+                    data_len += b.data.len();
+                }
+            }
+        }
+
+        /* The maximum length of an uncompressed block is 0xffff bytes, each uncompressed block
+         * header is 5 bytes. */
+        let num_blocks = (data_len + 0xffff - 1) / 0xffff;
+        payload_len += num_blocks * 5;
+        payload_len += data_len;
+
+        /* The length of the following Bomb header (if there is one) is 13 bytes. */
+        if has_rep {
+            payload_len += 13;
+        }
+
+        let gen_block = move |child_op: Option<&mut Payload>| -> Box<[u8]> {
+            let mut ret: Vec<u8> = Vec::new();
+            let mut last_block: usize = 0;
+
+            /* the block of the child we're writing */
+            let mut child_idx: usize = 0;
+            /* the index within that block */
+            let mut child_pos: usize = 0;
+
+            let child = child_op.expect("Trying to fill a block with no child");
+
+            /* if we saw a bomb last time, \x02\x00\x00\xff\xff */
+            if start_c != 0 {
+                last_block = ret.len();
+                ret.push(0x02);
+                ret.push(0x00);
+                ret.push(0x00);
+                ret.push(0xff);
+                ret.push(0xff);
+            }
+
+            let mut this_start = 0;
+            while this_start < data_len {
+                let this_end = std::cmp::min(this_start + 0xffff, data_len);
+                let this_len = this_end - this_start;
+
+                last_block = ret.len();
+
+                /* start of an uncompressed block */
+                ret.push(0x00);
+
+                /* uncompressed block length */
+                ret.push((this_len & 0xff) as u8);
+                ret.push((this_len >> 8)   as u8);
+
+                /* ones compliment of the block length */
+                let inverse_len = !this_len;
+                ret.push((inverse_len & 0xff) as u8);
+                ret.push((inverse_len >> 8)   as u8);
+
+                /* data of uncompressed block */
+                for _i in this_start..this_end {
+                    let byte: u8;
+                    match &child.data[child_idx] {
+                        Segment::Block(b) => {
+                            if let BlockData::Known(data) = &b.data {
+                                byte = data[child_pos];
+                                child_pos += 1;
+                                if child_pos >= data.len() {
+                                    child_idx += 1;
+                                    child_pos = 0;
+                                }
+                            } else {
+                                panic!("Filling in block with unfilled child");
+                            }
+                        }
+                        Segment::Bomb(b) => {
+                            byte = b.data[child_pos];
+                            child_pos += 1;
+                            if child_pos >= b.data.len() {
+                                child_idx += 1;
+                                child_pos = 0;
+                            }
+                        }
+                    }
+                    ret.push(byte);
+                }
+
+                this_start = this_end;
+            }
+
+            if has_rep {
+                /* there is a bomb after this, so we write the header of the next block */
+                last_block = ret.len();
+                ret.push(0xec);
+                ret.push(0xc0);
+                ret.push(0x81);
+                ret.push(0x00);
+                ret.push(0x00);
+                ret.push(0x00);
+                ret.push(0x00);
+                ret.push(0x00);
+                ret.push(0x90);
+                ret.push(0xff);
+                ret.push(0x6b);
+                ret.push(0x23);
+                ret.push(0x54);
+            }
+
+            if is_last {
+                /* there is no bomb after this, so we set the BFINAL bit */
+                ret[last_block] |= 1;
+            }
+
+            return Box::new([0]);
+        };
+
+        let block = Segment::Block(Block {
+            data: BlockData::Unfilled(Box::new(gen_block)),
+            len: payload_len,
+        });
+        output.push(block);
+
+        if has_rep {
+            let fill = move |child_op: Option<&mut Payload>, size: &BigUint| {
+                let child_size = size * 1032u16 + 774u16;
+                let child = child_op.expect("Trying to fill DEFLATE bomb with no child");
+                if let Segment::Bomb(b) =
+                        &mut child.data[end] {
+                    if let Option::Some(grandchild) = &mut child.child {
+                        b.fill(Option::Some(grandchild), child_size);
+                    } else {
+                        b.fill(Option::None, child_size);
+                    }
+                }
+            };
+
+            let bomb = Segment::Bomb(Bomb {
+                data: Box::new([0x55]),
+                size: BigUint::ZERO,
+                fill: Box::new(fill),
+            });
+
+            output.push(bomb);
+        }
+
+        start = end + 1;
+    }
+
+    if let Segment::Bomb(_b) = &payload.data[payload.data.len() - 1] {
+        let f = Segment::Block(Block::new(Box::new([0])));
+        output.push(f);
     }
 }
