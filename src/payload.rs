@@ -558,7 +558,7 @@ pub fn deflate_raw(payload: &Payload, output: &mut Vec<Segment>) {
             if start_c != 0 {
                 last_block = ret.len();
                 last_bit = 0x20;
-                ret.push(0x02);
+                ret.push(0x05);
             }
 
             let mut this_start = 0;
@@ -648,7 +648,7 @@ pub fn deflate_raw(payload: &Payload, output: &mut Vec<Segment>) {
 
         if has_rep {
             let fill = move |child_op: Option<&mut Payload>, size: &BigUint| {
-                let child_size = size * 1032u16 + 1290u16;
+                let child_size = size * 1032u16 + 1291u16;
                 let child = child_op.expect("Trying to fill DEFLATE bomb with no child");
                 if let Segment::Bomb(b) =
                         &mut child.data[end] {
@@ -673,7 +673,7 @@ pub fn deflate_raw(payload: &Payload, output: &mut Vec<Segment>) {
     }
 
     if let Segment::Bomb(_b) = &payload.data[payload.data.len() - 1] {
-        let f = Segment::Block(Block::new(Box::new([0])));
+        let f = Segment::Block(Block::new(Box::new([0x05])));
         output.push(f);
     }
 }
