@@ -5,17 +5,28 @@ fn biguint(n: usize) -> num::BigUint {
 }
 
 fn main() {
-    let block1_data: [u8; 1] = [97];
-    let mut block1_b = payload::Bomb::new(Box::new(block1_data));
-    block1_b.fill(Option::None, biguint(10).pow(100));
-    let block1 = payload::Segment::Bomb(block1_b);
+    let block1_data: [u8; 1] = [65];
+    let block1_b = payload::Block::new(Box::new(block1_data));
+    let block1 = payload::Segment::Block(block1_b);
 
-    let payload_data: [payload::Segment; 1] = [block1];
+    let block2_data: [u8; 1] = [66];
+    let block2_b = payload::Bomb::new(Box::new(block2_data));
+    let block2 = payload::Segment::Bomb(block2_b);
+
+    let block3_data: [u8; 1] = [67];
+    let block3_b = payload::Block::new(Box::new(block3_data));
+    let _block3 = payload::Segment::Block(block3_b);
+
+    //let payload_data: [payload::Segment; 3] = [block1, block2, block3];
+    let payload_data: [payload::Segment; 2] = [block1, block2];
     let payload = payload::Payload::new(Box::new(payload_data));
 
-    let adler32 = payload.crc32();
-    println!("{:02x}", adler32[0]);
-    println!("{:02x}", adler32[1]);
-    println!("{:02x}", adler32[2]);
-    println!("{:02x}", adler32[3]);
+    let mut compressed = Vec::<payload::Segment>::new();
+    payload::deflate_raw(&payload, &mut compressed);
+
+    let mut compressed_payload = payload::Payload::new(compressed.into_boxed_slice());
+    compressed_payload.child = Option::Some(Box::new(payload));
+    compressed_payload.fill(biguint(100));
+
+    compressed_payload.write(&mut std::io::stdout());
 }

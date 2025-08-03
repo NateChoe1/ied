@@ -45,7 +45,7 @@ pub enum Segment {
 
 pub struct Payload {
     pub data: Box<[Segment]>,
-    child: Option<Box<Payload>>,
+    pub child: Option<Box<Payload>>,
 }
 
 impl Block {
@@ -492,7 +492,7 @@ impl CrcMatrix {
  *
  * Each block contains literal blocks, as well as the header for the next Bomb block. The size of
  * the Block can be statically determined, but its contents are determined at fill time. */
-fn deflate_raw(payload: &Payload, output: &mut Vec<Segment>) {
+pub fn deflate_raw(payload: &Payload, output: &mut Vec<Segment>) {
     let mut start = 0;
     while start < payload.data.len() {
         let mut end = start;
@@ -642,7 +642,7 @@ fn deflate_raw(payload: &Payload, output: &mut Vec<Segment>) {
                 ret[last_block] |= 1;
             }
 
-            return Box::new([0]);
+            return ret.as_slice().into();
         };
 
         let block = Segment::Block(Block {
