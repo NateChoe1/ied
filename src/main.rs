@@ -16,11 +16,7 @@ fn main() {
     let payload_data: [payload::Segment; 2] = [block1, block2];
     let payload = payload::Payload::new(Box::new(payload_data));
 
-    let mut compressed = Vec::<payload::Segment>::new();
-    payload::deflate_raw(&payload, &mut compressed);
-
-    let mut compressed_payload = payload::Payload::new(compressed.into_boxed_slice());
-    compressed_payload.child = Option::Some(Box::new(payload));
+    let mut compressed_payload = payload::deflate_raw(payload);
     compressed_payload.fill(biguint(1));
 
     compressed_payload.write(&mut std::io::stdout());
