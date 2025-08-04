@@ -292,6 +292,7 @@ impl Payload {
         ]
     }
 
+    /* the size of this layer */
     pub fn size(&self) -> BigUint {
         let mut ret = BigUint::ZERO;
         for segment in (*self.data).iter() {
@@ -305,6 +306,15 @@ impl Payload {
             }
         }
         return ret;
+    }
+
+    /* the size of the final layer */
+    pub fn final_size(&self) -> BigUint {
+        if let Option::Some(child) = &self.child {
+            return child.final_size();
+        }
+
+        return self.size();
     }
 }
 
@@ -519,7 +529,10 @@ fn deflate_to_vec(payload: &Payload, output: &mut Vec<Segment>) {
                 has_rep = false;
                 break;
             }
-            if let Segment::Bomb(_b) = &payload.data[end] {
+            if let Segment::Bomb(b) = &payload.data[end] {
+                if b.data.len() != 1 {
+                    panic!("DEFLATE bomb has multibyte data");
+                }
                 has_rep = true;
                 break;
             }
