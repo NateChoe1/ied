@@ -1,55 +1,76 @@
+use crate::payload::*;
+use std::str::FromStr;
+use std::io::Read;
+
 pub mod payload;
 
-fn biguint(n: usize) -> num::BigUint {
-    return num::BigUint::ZERO + n;
-}
-
 fn main() {
-    let block1_data: [u8; 1] = [65];
-    let block1_b = payload::Block::new(Box::new(block1_data));
-    let block1 = payload::Segment::Block(block1_b);
+    let mut data = Vec::<Segment>::new();
+    let args: Vec<String> = std::env::args().collect();
 
-    let block2_data: [u8; 1] = [66];
-    let block2_b = payload::Bomb::new(Box::new(block2_data));
-    let block2 = payload::Segment::Bomb(block2_b);
+    if args.len() < 3 {
+        println!("Usage: ied [content encoding] [size] [payload]");
+        return;
+    }
 
-    let payload_data: [payload::Segment; 2] = [block1, block2];
-    let payload = payload::Payload::new(Box::new(payload_data));
+    let encoding = &args[1];
+    let size = num::BigUint::from_str(&args[2]).expect("Invalid size given");
 
-    let mut compressed_payload = payload::gzip(payload);
-    compressed_payload = payload::gzip(compressed_payload);
-    compressed_payload = payload::gzip(compressed_payload);
-    compressed_payload = payload::gzip(compressed_payload);
-    compressed_payload = payload::gzip(compressed_payload);
-    compressed_payload = payload::gzip(compressed_payload);
-    compressed_payload = payload::gzip(compressed_payload);
-    compressed_payload = payload::gzip(compressed_payload);
-    compressed_payload = payload::gzip(compressed_payload);
-    compressed_payload = payload::gzip(compressed_payload);
-    compressed_payload = payload::gzip(compressed_payload);
-    compressed_payload = payload::gzip(compressed_payload);
-    compressed_payload = payload::gzip(compressed_payload);
-    compressed_payload = payload::gzip(compressed_payload);
-    compressed_payload = payload::gzip(compressed_payload);
-    compressed_payload = payload::gzip(compressed_payload);
-    compressed_payload = payload::gzip(compressed_payload);
-    compressed_payload = payload::gzip(compressed_payload);
-    compressed_payload = payload::gzip(compressed_payload);
-    compressed_payload = payload::gzip(compressed_payload);
-    compressed_payload = payload::gzip(compressed_payload);
-    compressed_payload = payload::gzip(compressed_payload);
-    compressed_payload = payload::gzip(compressed_payload);
-    compressed_payload = payload::gzip(compressed_payload);
-    compressed_payload = payload::gzip(compressed_payload);
-    compressed_payload = payload::gzip(compressed_payload);
-    compressed_payload = payload::gzip(compressed_payload);
-    compressed_payload = payload::gzip(compressed_payload);
-    compressed_payload = payload::gzip(compressed_payload);
-    compressed_payload = payload::gzip(compressed_payload);
-    compressed_payload = payload::gzip(compressed_payload);
-    compressed_payload = payload::gzip(compressed_payload);
-    compressed_payload = payload::gzip(compressed_payload);
-    compressed_payload.fill(&biguint(1));
+    let mut cur_arg = 3;
+    while cur_arg < args.len() {
+        if args[cur_arg] == "-f" {
+            cur_arg += 1;
+            if cur_arg >= args.len() {
+                panic!("-f: missing file");
+            }
+            let mut file = std::fs::File::open(&args[cur_arg]).expect("Failed to open file");
+            let mut contents: Vec<u8> = vec![];
+            file.read_to_end(&mut contents).expect("Failed to read file");
 
-    println!("{}", compressed_payload.final_size());
+            let block = Segment::Block(Block::new(contents.into_boxed_slice()));
+            data.push(block);
+
+            cur_arg += 1;
+            continue;
+        }
+
+        let byte: u8;
+        if args[cur_arg] == "-l" {
+            cur_arg += 1;
+            if cur_arg >= args.len() {
+                panic!("-l: missing character");
+            }
+            byte = args[cur_arg].chars().nth(0).expect("-l: missing character") as u8;
+            cur_arg += 1;
+        } else if args[cur_arg] == "-L" {
+            cur_arg += 1;
+            if cur_arg >= args.len() {
+                panic!("-L: missing character");
+            }
+            byte = args[cur_arg].parse::<u8>().expect("-L: invalid character");
+            cur_arg += 1;
+        } else {
+            panic!("Invalid flag {}", args[cur_arg]);
+        }
+
+        let bomb = Segment::Bomb(Bomb::new(Box::new([byte])));
+        data.push(bomb);
+    }
+
+    let mut payload = Payload::new(data.into_boxed_slice());
+    let split = encoding.split(',');
+
+    for method_raw in split.into_iter() {
+        let method = method_raw.trim();
+        if method == "gzip" {
+            payload = gzip(payload);
+        } else if method == "deflate" {
+            payload = zlib(payload);
+        } else {
+            panic!("Invalid method {}", method);
+        }
+    }
+
+    payload.fill(&size);
+    payload.write(&mut std::io::stdout());
 }

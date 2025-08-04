@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use num::BigUint;
 use std::io;
 
@@ -504,12 +502,6 @@ impl CrcMatrix {
             ret |= bit;
         }
         return ret as u32;
-    }
-
-    fn print(&self) {
-        for i in 0..33 {
-            println!("{:033b}", self.items[i]);
-        }
     }
 }
 
