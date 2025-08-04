@@ -29,3 +29,10 @@ ied $(python3 -c "print((',gzip'*34)[1:])") 1 -L 65
 ```
 ied $(python3 -c "print((',gzip'*34)[1:])") 1 -f head.html -L 65 -f tail.html
 ```
+
+## License
+
+This work is licensed under the [GNU AGPL version
+3.0](https://www.gnu.org/licenses/agpl-3.0.html). You may redistribute this work
+under it or any later version of the license, as published by the Free Software
+Foundation.
