@@ -17,7 +17,39 @@ fn main() {
     let payload = payload::Payload::new(Box::new(payload_data));
 
     let mut compressed_payload = payload::gzip(payload);
+    compressed_payload = payload::gzip(compressed_payload);
+    compressed_payload = payload::gzip(compressed_payload);
+    compressed_payload = payload::gzip(compressed_payload);
+    compressed_payload = payload::gzip(compressed_payload);
+    compressed_payload = payload::gzip(compressed_payload);
+    compressed_payload = payload::gzip(compressed_payload);
+    compressed_payload = payload::gzip(compressed_payload);
+    compressed_payload = payload::gzip(compressed_payload);
+    compressed_payload = payload::gzip(compressed_payload);
+    compressed_payload = payload::gzip(compressed_payload);
+    compressed_payload = payload::gzip(compressed_payload);
+    compressed_payload = payload::gzip(compressed_payload);
+    compressed_payload = payload::gzip(compressed_payload);
+    compressed_payload = payload::gzip(compressed_payload);
+    compressed_payload = payload::gzip(compressed_payload);
+    compressed_payload = payload::gzip(compressed_payload);
+    compressed_payload = payload::gzip(compressed_payload);
+    compressed_payload = payload::gzip(compressed_payload);
+    compressed_payload = payload::gzip(compressed_payload);
+    compressed_payload = payload::gzip(compressed_payload);
+    compressed_payload = payload::gzip(compressed_payload);
+    compressed_payload = payload::gzip(compressed_payload);
+    compressed_payload = payload::gzip(compressed_payload);
+    compressed_payload = payload::gzip(compressed_payload);
+    compressed_payload = payload::gzip(compressed_payload);
+    compressed_payload = payload::gzip(compressed_payload);
+    compressed_payload = payload::gzip(compressed_payload);
+    compressed_payload = payload::gzip(compressed_payload);
+    compressed_payload = payload::gzip(compressed_payload);
+    compressed_payload = payload::gzip(compressed_payload);
+    compressed_payload = payload::gzip(compressed_payload);
+    compressed_payload = payload::gzip(compressed_payload);
     compressed_payload.fill(&biguint(1));
 
-    compressed_payload.write(&mut std::io::stdout());
+    println!("{}", compressed_payload.final_size());
 }
