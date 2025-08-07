@@ -79,6 +79,58 @@ impl Bomb {
     }
 }
 
+fn adler_bomb(b: &Bomb, s0: u64, s1: u64) -> (u64, u64) {
+    /* See https://natechoe.dev/blog/2025-08-04.html */
+    let mut t0: u64 = 0;
+    let mut t1: u64 = 0;
+    for byte in &b.data {
+        t0 += *byte as u64;
+        t0 %= 65521;
+        t1 += t0;
+        t1 %= 65521;
+    }
+
+    let tri = t1;
+
+    let rect = t0 * (b.data.len() as u64);
+    let full_blocks_option = biguint_to_u64(
+            (b.size.clone() / b.data.len()) % (65521 as u64));
+    let full_blocks: u64;
+    if let Some(v) = full_blocks_option {
+        full_blocks = v;
+    } else {
+        panic!("Failed to convert BigUint to u64");
+    }
+    let extra_bytes_option = biguint_to_u64(b.size.clone() % b.data.len());
+    let extra_bytes: u64;
+    if let Some(v) = extra_bytes_option {
+        extra_bytes = v;
+    } else {
+        panic!("Failed to convert BigUint to u64");
+    }
+
+    let num_rects = (full_blocks * (full_blocks-1) * 32761) % 65521;
+
+    let mut r0 = s0;
+    let mut r1 = s1;
+
+    r1 += r0 * full_blocks * (b.data.len() as u64);
+    r0 += t0 * full_blocks;
+    r1 += tri * full_blocks + rect * num_rects;
+
+    r0 %= 65521;
+    r1 %= 65521;
+
+    for i in 0..extra_bytes {
+        r0 += b.data[i as usize] as u64;
+        r0 %= 65521;
+        r1 += r0;
+        r1 %= 65521;
+    }
+
+    return (r0, r1);
+}
+
 impl Payload {
     pub fn new(data: Box<[Segment]>) -> Payload {
         return Payload {
@@ -171,50 +223,7 @@ impl Payload {
                     }
                 }
                 Segment::Bomb(b) => {
-                    /* This algorithm works, trust me */
-                    let mut t0: u64 = 0;
-                    let mut t1: u64 = 0;
-                    for byte in &b.data {
-                        t0 += *byte as u64;
-                        t0 %= 65521;
-                        t1 += t0;
-                        t1 %= 65521;
-                    }
-
-                    let tri = t1;
-
-                    let rect = t0 * (b.data.len() as u64);
-                    let full_blocks_option = biguint_to_u64(
-                            (b.size.clone() / b.data.len()) % (65521 as u64));
-                    let full_blocks: u64;
-                    if let Some(v) = full_blocks_option {
-                        full_blocks = v;
-                    } else {
-                        panic!("Failed to convert BigUint to u64");
-                    }
-                    let extra_bytes_option = biguint_to_u64(b.size.clone() % b.data.len());
-                    let extra_bytes: u64;
-                    if let Some(v) = extra_bytes_option {
-                        extra_bytes = v;
-                    } else {
-                        panic!("Failed to convert BigUint to u64");
-                    }
-
-                    let num_rects = (full_blocks * (full_blocks-1) * 32761) % 65521;
-
-                    s1 += s0 * full_blocks * (b.data.len() as u64);
-                    s0 += t0 * full_blocks;
-                    s1 += tri * full_blocks + rect * num_rects;
-
-                    s0 %= 65521;
-                    s1 %= 65521;
-
-                    for i in 0..extra_bytes {
-                        s0 += b.data[i as usize] as u64;
-                        s0 %= 65521;
-                        s1 += s0;
-                        s1 %= 65521;
-                    }
+                    (s0, s1) = adler_bomb(&b, s0, s1);
                 }
             }
         }
