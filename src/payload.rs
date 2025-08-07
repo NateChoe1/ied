@@ -475,7 +475,9 @@ pub fn gzip(payload: Payload) -> Payload {
 
     fn crc32(child_op: Option<&mut Payload>) -> Box<[u8]> {
         let child = child_op.expect("Calculating CRC-32 checksum of invalid child");
-        return Box::new(child.crc32());
+        let mut val = child.crc32();
+        val.reverse();
+        return Box::new(val);
     }
 
     /* CRC-32 checksum */
