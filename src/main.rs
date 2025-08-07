@@ -62,7 +62,9 @@ fn main() {
 
     for method_raw in split.into_iter() {
         let method = method_raw.trim();
-        if method == "gzip" {
+        if method == "" {
+            continue;
+        } else if method == "gzip" {
             payload = gzip(payload);
         } else if method == "deflate" {
             payload = zlib(payload);
