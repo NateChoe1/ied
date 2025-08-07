@@ -76,3 +76,18 @@ impl AdlerEngine {
         ];
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_adler() {
+        let mut engine = AdlerEngine::new();
+        engine.apply1(0x74);
+        engine.apply(&[0x65, 0x73, 0x74, 0x20]);
+        engine.apply_rep(&[0x61, 0x62, 0x63], BigUint::ZERO + 3u8);
+        engine.apply1(0x64);
+        assert_eq!(engine.bytes(), [0x2e, 0x12, 0x05, 0xb7]);
+    }
+}
