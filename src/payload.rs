@@ -1,8 +1,10 @@
 use num::BigUint;
 use std::io;
 use crate::payload::matrix::CrcMatrix;
+use crate::payload::adler::AdlerEngine;
 
 mod matrix;
+mod adler;
 
 /* A block is a "fixed" piece of data. This includes things like file headers/tails, as well as
  * checksums. Bombs are only guaranteed to be valid if their corresponding payload is fully
@@ -79,58 +81,6 @@ impl Bomb {
     }
 }
 
-fn adler_bomb(b: &Bomb, s0: u64, s1: u64) -> (u64, u64) {
-    /* See https://natechoe.dev/blog/2025-08-04.html */
-    let mut t0: u64 = 0;
-    let mut t1: u64 = 0;
-    for byte in &b.data {
-        t0 += *byte as u64;
-        t0 %= 65521;
-        t1 += t0;
-        t1 %= 65521;
-    }
-
-    let tri = t1;
-
-    let rect = t0 * (b.data.len() as u64);
-    let full_blocks_option = biguint_to_u64(
-            (b.size.clone() / b.data.len()) % (65521 as u64));
-    let full_blocks: u64;
-    if let Some(v) = full_blocks_option {
-        full_blocks = v;
-    } else {
-        panic!("Failed to convert BigUint to u64");
-    }
-    let extra_bytes_option = biguint_to_u64(b.size.clone() % b.data.len());
-    let extra_bytes: u64;
-    if let Some(v) = extra_bytes_option {
-        extra_bytes = v;
-    } else {
-        panic!("Failed to convert BigUint to u64");
-    }
-
-    let num_rects = (full_blocks * (full_blocks-1) * 32761) % 65521;
-
-    let mut r0 = s0;
-    let mut r1 = s1;
-
-    r1 += r0 * full_blocks * (b.data.len() as u64);
-    r0 += t0 * full_blocks;
-    r1 += tri * full_blocks + rect * num_rects;
-
-    r0 %= 65521;
-    r1 %= 65521;
-
-    for i in 0..extra_bytes {
-        r0 += b.data[i as usize] as u64;
-        r0 %= 65521;
-        r1 += r0;
-        r1 %= 65521;
-    }
-
-    return (r0, r1);
-}
-
 impl Payload {
     pub fn new(data: Box<[Segment]>) -> Payload {
         return Payload {
@@ -204,37 +154,28 @@ impl Payload {
     }
 
     pub fn adler32(&self) -> [u8; 4] {
-        let mut s0: u64 = 1;
-        let mut s1: u64 = 0;
+        let mut engine = AdlerEngine::new(); 
         for segment in (*self.data).iter() {
             match segment {
                 Segment::Block(b) => {
-                    let data: &[u8];
                     if let BlockData::Known(d) = &b.data {
-                        data = d;
+                        engine.apply(d);
                     } else {
                         panic!("Calculating Adler32 of uninitialized block");
                     }
-                    for byte in data {
-                        s0 += *byte as u64;
-                        s0 %= 65521;
-                        s1 += s0;
-                        s1 %= 65521;
-                    }
                 }
                 Segment::Bomb(b) => {
-                    (s0, s1) = adler_bomb(&b, s0, s1);
+                    let full_blocks = b.size.clone() / b.data.len();
+                    let extra = biguint_to_u64(b.size.clone() % b.data.len())
+                        .expect("Failed to get extra bytes while calculating Adler32");
+
+                    engine.apply_rep(&b.data, full_blocks);
+                    engine.apply(&b.data[..(extra as usize)]);
                 }
             }
         }
 
-        let ret: [u8; 4] = [
-            (s1 >> 8)  as u8,
-            (s1 & 255) as u8,
-            (s0 >> 8)  as u8,
-            (s0 & 255) as u8,
-        ];
-        return ret;
+        return engine.bytes();
     }
 
     pub fn crc32(&self) -> [u8; 4] {
