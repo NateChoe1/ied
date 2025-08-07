@@ -1,3 +1,4 @@
+use crate::payload::checksum::ChecksumEngine;
 use num::BigUint;
 
 pub struct AdlerEngine {
@@ -23,22 +24,17 @@ impl AdlerEngine {
             s2: 0,
         };
     }
+}
 
-    pub fn apply1(&mut self, data: u8) {
+impl ChecksumEngine for AdlerEngine {
+    fn apply1(&mut self, data: u8) {
         self.s1 += data as u32;
         self.s1 %= 65521;
         self.s2 += self.s1;
         self.s2 %= 65521;
     }
 
-    pub fn apply(&mut self, data: &[u8]) {
-        for byte in data {
-            self.apply1(*byte);
-        }
-    }
-
-    /* reps is mod 65521*/
-    pub fn apply_rep(&mut self, data: &[u8], reps: BigUint) {
+    fn apply_rep(&mut self, data: &[u8], reps: BigUint) {
         /* See https://natechoe.dev/blog/2025-08-04.html */
         let mut t1: u32 = 0;
         let mut t2: u32 = 0;
@@ -67,7 +63,7 @@ impl AdlerEngine {
         self.s2 %= 65521;
     }
 
-    pub fn bytes(&self) -> [u8; 4] {
+    fn bytes(&self) -> [u8; 4] {
         return [
             (self.s2 >> 8) as u8,
             (self.s2 & 255) as u8,

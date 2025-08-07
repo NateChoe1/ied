@@ -7,13 +7,12 @@ pub struct CrcMatrix {
 
 /* Calculates the hamming weight of n, mod 2 */
 fn hamming(n: u64) -> u64 {
-    /* I stole this trick from Stack Overflow, although I can't seem to find it */
-    let n1 = ((n  & 0xaaaaaaaaaaaaaaaau64) >> 1)  + (n & 0x5555555555555555u64);
-    let n2 = ((n1 & 0xccccccccccccccccu64) >> 2)  + (n & 0x3333333333333333u64);
-    let n3 = ((n2 & 0xf0f0f0f0f0f0f0f0u64) >> 4)  + (n & 0x0f0f0f0f0f0f0f0fu64);
-    let n4 = ((n3 & 0xff00ff00ff00ff00u64) >> 8)  + (n & 0x00ff00ff00ff00ffu64);
-    let n5 = ((n4 & 0xffff0000ffff0000u64) >> 16) + (n & 0x0000ffff0000ffffu64);
-    let n6 = ((n5 & 0xffffffff00000000u64) >> 32) + (n & 0x00000000ffffffffu64);
+    let n1 = (n  >> 32) ^ (n  & 0xffffffff);
+    let n2 = (n1 >> 16) ^ (n1 & 0xffff);
+    let n3 = (n2 >> 8)  ^ (n2 & 0xff);
+    let n4 = (n3 >> 4)  ^ (n3 & 0x0f);
+    let n5 = (n4 >> 2)  ^ (n4 & 0x03);
+    let n6 = (n5 >> 1)  ^ (n5 & 0x01);
 
     return n6;
 }
@@ -177,5 +176,18 @@ impl CrcMatrix {
             ret |= bit;
         }
         return ret as u32;
+    }
+}
+
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_hamming() {
+        assert_eq!(hamming(0b111), 1);
+        assert_eq!(hamming(0b101), 0);
+        assert_eq!(hamming(0b11011), 0);
+        assert_eq!(hamming(0b110100110100110100111010110010100), 1);
+        assert_eq!(hamming(0b110100110100110100111010110010101), 0);
     }
 }

@@ -1,10 +1,12 @@
 use num::BigUint;
 use std::io;
-use crate::payload::matrix::CrcMatrix;
+use crate::payload::checksum::ChecksumEngine;
 use crate::payload::adler::AdlerEngine;
+use crate::payload::crc32::Crc32Engine;
 
-mod matrix;
+mod checksum;
 mod adler;
+mod crc32;
 
 /* A block is a "fixed" piece of data. This includes things like file headers/tails, as well as
  * checksums. Bombs are only guaranteed to be valid if their corresponding payload is fully
@@ -153,21 +155,20 @@ impl Payload {
         return size
     }
 
-    pub fn adler32(&self) -> [u8; 4] {
-        let mut engine = AdlerEngine::new(); 
+    fn checksum(&self, engine: &mut impl ChecksumEngine) -> [u8; 4] {
         for segment in (*self.data).iter() {
             match segment {
                 Segment::Block(b) => {
                     if let BlockData::Known(d) = &b.data {
                         engine.apply(d);
                     } else {
-                        panic!("Calculating Adler32 of uninitialized block");
+                        panic!("Calculating checksum of uninitialized block");
                     }
                 }
                 Segment::Bomb(b) => {
                     let full_blocks = b.size.clone() / b.data.len();
                     let extra = biguint_to_u64(b.size.clone() % b.data.len())
-                        .expect("Failed to get extra bytes while calculating Adler32");
+                        .expect("Failed to get extra bytes while calculating checksum");
 
                     engine.apply_rep(&b.data, full_blocks);
                     engine.apply(&b.data[..(extra as usize)]);
@@ -178,69 +179,14 @@ impl Payload {
         return engine.bytes();
     }
 
+    pub fn adler32(&self) -> [u8; 4] {
+        let mut engine = AdlerEngine::new();
+        return self.checksum(&mut engine);
+    }
+
     pub fn crc32(&self) -> [u8; 4] {
-        let mut crc: u32 = 0xffffffff;
-
-        fn apply(crc: u32, byte: u8) -> u32 {
-            let mut ret: u32 = crc ^ (byte as u32);
-            for _i in 0..8 {
-                if (ret & 1) != 0 {
-                    ret = (ret >> 1) ^ 0xedb88320;
-                } else {
-                    ret = ret >> 1;
-                }
-            }
-            return ret;
-        }
-
-        for segment in (*self.data).iter() {
-            match segment {
-                Segment::Block(b) => {
-                    let data: &[u8];
-                    if let BlockData::Known(d) = &b.data {
-                        data = d;
-                    } else {
-                        panic!("Calculating CRC32 of uninitialized block");
-                    }
-                    for byte in data {
-                        crc = apply(crc, *byte);
-                    }
-                }
-                Segment::Bomb(b) => {
-                    let mut matr = CrcMatrix::new();
-                    let size = b.size.clone();
-                    let full_blocks = &size / b.data.len();
-                    let extra_bytes = biguint_to_u64(size % b.data.len())
-                        .expect("Failed to convert biguint to u64");
-
-                    for i in 0..b.data.len() {
-                        let byte = b.data[b.data.len() - i - 1];
-                        for j in 0..8 {
-                            if (byte & (1 << (7 - j))) != 0 {
-                                matr.push_1();
-                            } else {
-                                matr.push_0();
-                            }
-                        }
-                    }
-
-                    matr.exponentiate(&full_blocks);
-                    crc = matr.apply(crc);
-
-                    for i in 0..extra_bytes {
-                        crc = apply(crc, b.data[i as usize]);
-                    }
-                }
-            }
-        }
-
-        crc = !crc;
-        return [
-            (crc >> 0)  as u8,
-            (crc >> 8)  as u8,
-            (crc >> 16) as u8,
-            (crc >> 24) as u8,
-        ]
+        let mut engine = Crc32Engine::new();
+        return self.checksum(&mut engine);
     }
 
     /* the size of this layer */
